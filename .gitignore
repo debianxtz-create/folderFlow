@@ -1,0 +1,15 @@
+venv/
+token.json
+credentials.json
+*.db
+build/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+config.json
+*.log
+packaging/deb_build/
+packaging/Output/
+*.ico
+.DS_Store
