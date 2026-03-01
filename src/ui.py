@@ -686,6 +686,7 @@ class SyncAppMainWindow(QMainWindow):
 
     def start_manual_sync(self):
         self.lbl_sync_state.setText("Sync state: Starting...")
+        self.tray_icon.showMessage("Folder Flow", "Iniciando sincronización manual...")
         threading.Thread(target=self._run_sync_thread, daemon=True).start()
 
     def _run_sync_thread(self):
@@ -698,9 +699,11 @@ class SyncAppMainWindow(QMainWindow):
     def _on_sync_finished(self, success, message):
         if success:
             self.lbl_sync_state.setText("Sync state: Idle (Last success moments ago)")
+            self.tray_icon.showMessage("Folder Flow", "Sincronización finalizada correctamente.")
         else:
             self.lbl_sync_state.setText(f"Sync state: Error")
             self.log_message("ERROR", f"Sync failed: {message}")
+            self.tray_icon.showMessage("Folder Flow", f"Error en sincronización: {message}", QSystemTrayIcon.MessageIcon.Critical)
 
     def closeEvent(self, event):
         if self.tray_icon.isVisible():
