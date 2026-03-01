@@ -27,9 +27,9 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pillow
 
-      - name: Restore credentials.json from secret
+      - name: Prepare placeholder credentials.json
         run: |
-          echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+          echo '{"installed":{"client_id":"fake","project_id":"fake","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"fake","redirect_uris":["http://localhost"]}}' > credentials.json
         shell: bash
 
       - name: Build Windows executable
