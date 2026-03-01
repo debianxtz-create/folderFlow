@@ -80,6 +80,9 @@ class CloudFolderPickerDialog(QDialog):
         QApplication.processEvents()
 
         try:
+            if not self.drive_service:
+                return # Should not happen as load_folders checked it, but for safety
+            
             query = f"'{self.current_parent}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
             results = self.drive_service.files().list(
                 q=query,
