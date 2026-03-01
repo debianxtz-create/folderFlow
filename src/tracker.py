@@ -46,6 +46,22 @@ class SyncTracker:
             }
         return None
 
+    def get_file_state_by_drive_id(self, drive_id):
+        """Busca el estado de un archivo por su ID de Google Drive."""
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM file_state WHERE drive_id = ?', (drive_id,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                'id': row[0],
+                'relative_path': row[1],
+                'drive_id': row[2],
+                'local_mtime': row[3],
+                'drive_mtime': row[4],
+                'md5_checksum': row[5]
+            }
+        return None
+
     def upsert_file_state(self, relative_path, drive_id=None, local_mtime=None, drive_mtime=None, md5_checksum=None):
         """Inserta o actualiza el registro de un archivo."""
         existing = self.get_file_state(relative_path)
@@ -78,6 +94,12 @@ class SyncTracker:
         cursor = self.conn.cursor()
         cursor.execute('SELECT relative_path, drive_id, local_mtime, drive_mtime, md5_checksum FROM file_state')
         return cursor.fetchall()
+
+    def clear_all_states(self):
+        """Borra todos los registros de seguimiento."""
+        cursor = self.conn.cursor()
+        cursor.execute('DELETE FROM file_state')
+        self.conn.commit()
 
     def close(self):
         self.conn.close()

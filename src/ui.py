@@ -3,7 +3,7 @@ import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QFileDialog, 
                              QComboBox, QSpinBox, QMessageBox, QDialog, QListWidget, QListWidgetItem,
-                             QTabWidget, QTextEdit, QSystemTrayIcon, QMenu, QStyle, QCheckBox)
+                             QTabWidget, QTextEdit, QSystemTrayIcon, QMenu, QStyle, QCheckBox, QFrame)
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
 import threading
@@ -16,11 +16,12 @@ from src.autostart import enable_autostart, disable_autostart, is_autostart_enab
 
 class WorkerSignals(QObject):
     sync_finished = pyqtSignal(bool, str)
-    sync_progress = pyqtSignal(str)
+    sync_progress = pyqtSignal(str, str) # level, message
+    progress_update = pyqtSignal(int, int, str) # current, total, filename
 
 class CloudFolderPickerDialog(QDialog):
     def __init__(self, auth, parent=None):
-        super().__init__(parent)
+        super(CloudFolderPickerDialog, self).__init__(parent)
         self.auth = auth
         self.drive_service = None
         self.selected_folder_id = None
@@ -142,8 +143,8 @@ class SyncAppMainWindow(QMainWindow):
         self.auth = GoogleAuth()
         self.scheduler = SyncScheduler()
         
-        self.setWindowTitle("FolderFlow")
-        self.setMinimumSize(600, 450)
+        self.setWindowTitle("Folder Flow")
+        self.setMinimumSize(500, 800)
         
         icon_path = resource_path('folderFlow-icon.png')
         self.setWindowIcon(QIcon(icon_path))
@@ -152,8 +153,9 @@ class SyncAppMainWindow(QMainWindow):
         self.signals = WorkerSignals()
         self.signals.sync_finished.connect(self._on_sync_finished)
         self.signals.sync_progress.connect(self.log_message)
+        self.signals.progress_update.connect(self._update_progress_ui)
         
-        # Override print to capture engine logs visually (simple approach)
+        # Intercept print
         self._original_print = print
         import builtins
         builtins.print = self._custom_print
@@ -168,274 +170,368 @@ class SyncAppMainWindow(QMainWindow):
         self.update_scheduler_btn_state()
 
     def _custom_print(self, *args, **kwargs):
-        """Intercepta los prints para mandarlos al log visual además de la consola."""
         text = " ".join(map(str, args))
         self._original_print(text)
-        # Usar signals para interactuar con la UI desde otros hilos donde ocurren los prints
-        self.signals.sync_progress.emit(text)
+        level = "INFO"
+        message = text
+        if text.startswith("ERROR:"):
+            level = "ERROR"
+            message = text[6:].strip()
+        elif text.startswith("WARNING:"):
+            level = "WARNING"
+            message = text[8:].strip()
+        elif text.startswith("INFO:"):
+            level = "INFO"
+            message = text[5:].strip()
+            
+        self.signals.sync_progress.emit(level, message)
 
-    def log_message(self, text):
-        """Añade texto al visor de logs."""
-        if hasattr(self, 'text_logs'):
-            import datetime
-            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-            self.text_logs.append(f"[{timestamp}] {text}")
+    def log_message(self, level, message):
+        """Añade texto al visor de logs con colores."""
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        color = "#ffffff"
+        if level == "ERROR": color = "#f38ba8"
+        elif level == "WARNING": color = "#f9e2af"
+        
+        html_msg = f'<span style="color: #6c7086;">{timestamp}</span> <span style="color: {color};">{message}</span>'
+        self.text_logs.append(html_msg)
+        
+    def _update_progress_ui(self, current, total, filename):
+        self.lbl_progress_val.setText(f"{current}/{total}")
+        self.lbl_sync_state.setText(f"Sync state: Processing {filename}")
+
+    def _status_callback(self, level, data):
+        if level == 'PROGRESS':
+            self.signals.progress_update.emit(data['current'], data['total'], data['file'])
+        else:
+            self.signals.sync_progress.emit(level, str(data))
 
     def apply_styles(self):
-        # A sleek dark theme with vibrant accents
         self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1e1e2e;
+            QMainWindow, QWidget#MainContent {
+                background-color: #11111b;
             }
             QWidget {
-                background-color: #1e1e2e;
+                background-color: transparent;
                 color: #cdd6f4;
                 font-family: 'Segoe UI', 'Inter', sans-serif;
-                font-size: 13px;
-            }
-            QLabel {
-                padding: 2px;
+                font-size: 14px;
             }
             QTabWidget::pane {
-                border: 1px solid #313244;
-                background: #1e1e2e;
-                border-radius: 4px;
+                border: none;
+                background: #11111b;
             }
             QTabBar::tab {
                 background: #181825;
                 color: #a6adc8;
-                padding: 10px 20px;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                margin-right: 2px;
+                padding: 14px 28px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                margin-right: 4px;
+                font-weight: bold;
+                font-size: 15px;
             }
             QTabBar::tab:selected {
-                background: #313244;
-                color: #cdd6f4;
+                background: #1e1e2e;
+                color: #89b4fa;
                 border-bottom: 2px solid #89b4fa;
-                font-weight: bold;
-            }
-            QTabBar::tab:hover:!selected {
-                background: #252538;
             }
             QPushButton {
-                background-color: #89b4fa;
-                color: #11111b;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #b4befe;
-            }
-            QPushButton:pressed {
-                background-color: #74c7ec;
-            }
-            QPushButton:disabled {
-                background-color: #45475a;
-                color: #a6adc8;
-            }
-            QPushButton#ActionBtn {
-                background-color: #a6e3a1;
-                font-size: 14px;
-            }
-            QPushButton#ActionBtn:hover {
-                background-color: #94e2d5;
-            }
-            QPushButton#DangerBtn {
-                background-color: #f38ba8;
-            }
-            QPushButton#DangerBtn:hover {
-                background-color: #eba0ac;
-            }
-            QTextEdit {
-                background-color: #11111b;
-                color: #a6e3a1;
-                border: 1px solid #313244;
-                border-radius: 6px;
-                padding: 8px;
-                font-family: 'Consolas', 'Courier New', monospace;
-            }
-            QComboBox, QSpinBox {
                 background-color: #313244;
                 color: #cdd6f4;
-                border: 1px solid #45475a;
-                border-radius: 4px;
-                padding: 6px;
-            }
-            QComboBox::drop-down {
                 border: none;
+                border-radius: 8px;
+                padding: 12px 18px;
+                font-weight: bold;
+                font-size: 15px;
             }
-            QComboBox QAbstractItemView {
+            QPushButton:hover {
+                background-color: #45475a;
+            }
+            QPushButton#ActionBtn {
+                background-color: #89b4fa;
+                color: #11111b;
+            }
+            QPushButton#ActionBtn:hover {
+                background-color: #b4befe;
+            }
+            QPushButton#DangerBtn {
+                color: #f38ba8;
+            }
+            QPushButton#HeaderBtn {
+                background-color: #1e1e2e;
+                border: 1px solid #313244;
+                border-radius: 10px;
+                padding: 5px;
+            }
+            QPushButton#HeaderBtn:hover {
                 background-color: #313244;
-                selection-background-color: #45475a;
+            }
+            QTextEdit {
+                background-color: #181825;
+                color: #cdd6f4;
+                border: 1px solid #313244;
+                border-radius: 10px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 13px;
+            }
+            QComboBox, QSpinBox {
+                background-color: #1e1e2e;
+                border: 1px solid #313244;
+                border-radius: 6px;
+                padding: 6px;
+                font-size: 14px;
+            }
+            #StatusCard {
+                background-color: #1e1e2e;
+                border-radius: 15px;
+                padding: 18px;
+            }
+            #LogCard {
+                background-color: #1e1e2e;
+                border-radius: 15px;
+                padding: 18px;
+            }
+            QLabel#HeaderTitle {
+                font-size: 30px;
+                font-weight: bold;
+                color: #ffffff;
+            }
+            QLabel#CardTitle {
+                font-size: 22px;
+                font-weight: bold;
+                color: #ffffff;
+                margin-bottom: 12px;
+            }
+            QLabel#StatusInfo {
+                font-size: 15px;
+                color: #bac2de;
+                padding: 4px 0px;
             }
         """)
 
     def init_ui(self):
+        self.main_widget = QWidget()
+        self.main_widget.setObjectName("MainContent")
+        self.setCentralWidget(self.main_widget)
+        main_layout = QVBoxLayout(self.main_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(20)
+
+        # Header
+        header = QHBoxLayout()
+        title = QLabel("Folder Flow")
+        title.setObjectName("HeaderTitle")
+        header.addWidget(title)
+        header.addStretch()
+        
+        self.btn_stop_main = QPushButton()
+        self.btn_stop_main.setObjectName("HeaderBtn")
+        self.btn_stop_main.setFixedSize(35, 35)
+        self.btn_stop_main.clicked.connect(self.toggle_scheduler)
+        
+        self.btn_settings_main = QPushButton()
+        self.btn_settings_main.setObjectName("HeaderBtn")
+        self.btn_settings_main.setFixedSize(35, 35)
+        self.btn_settings_main.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        self.btn_settings_main.setToolTip("Ajustes")
+        self.btn_settings_main.clicked.connect(lambda: self.tabs.setCurrentIndex(1))
+        
+        header.addWidget(self.btn_stop_main)
+        header.addWidget(self.btn_settings_main)
+        main_layout.addLayout(header)
+
         self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
-        self.tabs.setContentsMargins(10, 10, 10, 10)
+        main_layout.addWidget(self.tabs)
 
-        # --- TAB 1: ESTADO Y LOGS ---
-        self.tab_logs = QWidget()
-        logs_layout = QVBoxLayout(self.tab_logs)
-        logs_layout.setSpacing(15)
-        logs_layout.setContentsMargins(15, 15, 15, 15)
-        
-        # Removed Branding Header
+        # --- TAB 1: MONITOR ---
+        self.tab_monitor = QWidget()
+        monitor_layout = QVBoxLayout(self.tab_monitor)
+        monitor_layout.setSpacing(15)
+        monitor_layout.setContentsMargins(0, 10, 0, 0)
 
-        # Status Header
-        status_layout = QHBoxLayout()
-        self.lbl_auth_status = QLabel("Estado: No Autenticado")
-        self.lbl_auth_status.setStyleSheet("font-weight: bold; font-size: 14px;")
-        status_layout.addWidget(self.lbl_auth_status)
+        # Status Card
+        status_card = QFrame()
+        status_card.setObjectName("StatusCard")
+        status_card.setFrameShape(QFrame.Shape.StyledPanel)
+        sc_layout = QVBoxLayout(status_card)
         
-        # Scheduler Toggle
-        self.btn_toggle_scheduler = QPushButton("Pausar Sincronizador")
-        self.btn_toggle_scheduler.clicked.connect(self.toggle_scheduler)
-        status_layout.addStretch()
-        status_layout.addWidget(self.btn_toggle_scheduler)
-        logs_layout.addLayout(status_layout)
+        lbl_status_title = QLabel("Status")
+        lbl_status_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_status_title.setObjectName("CardTitle")
+        sc_layout.addWidget(lbl_status_title)
+
+        # Status Grid Infos
+        self.lbl_logged_user = QLabel("✅ Logged in as: -")
+        self.lbl_local_path_disp = QLabel("📁 Local: -")
+        self.lbl_cloud_path_disp = QLabel("☁️ Drive: -")
+        self.lbl_mode_disp = QLabel("🔄 Mode: -")
+        self.lbl_interval_disp = QLabel("⏱️ Interval: -")
         
-        # Logs View
+        progress_layout = QHBoxLayout()
+        progress_layout.addWidget(QLabel("📊 Progress:"))
+        self.lbl_progress_val = QLabel("0/0")
+        self.lbl_progress_val.setStyleSheet("font-weight: bold; color: #89b4fa;")
+        progress_layout.addWidget(self.lbl_progress_val)
+        progress_layout.addStretch()
+        
+        self.lbl_sync_state = QLabel("Sync state: Idle")
+        self.lbl_sync_state.setStyleSheet("font-style: italic; color: #a6adc8; font-size: 11px;")
+        self.lbl_sync_state.setWordWrap(True)
+
+        for lbl in [self.lbl_logged_user, self.lbl_local_path_disp, self.lbl_cloud_path_disp, 
+                    self.lbl_mode_disp, self.lbl_interval_disp]:
+            lbl.setObjectName("StatusInfo")
+            sc_layout.addWidget(lbl)
+        
+        sc_layout.addLayout(progress_layout)
+        sc_layout.addWidget(self.lbl_sync_state)
+        monitor_layout.addWidget(status_card)
+
+        # Log Card
+        log_card = QFrame()
+        log_card.setObjectName("LogCard")
+        lc_layout = QVBoxLayout(log_card)
+        
+        log_header = QHBoxLayout()
+        log_header.addWidget(QLabel("Sync Log"))
+        log_header.addStretch()
+        
+        self.combo_log_filter = QComboBox()
+        self.combo_log_filter.addItems(["All", "Errors", "Warnings", "Info"])
+        self.combo_log_filter.setFixedWidth(100)
+        log_header.addWidget(self.combo_log_filter)
+        
+        btn_clear_logs = QPushButton("🗑 Clear")
+        btn_clear_logs.setStyleSheet("color: #89b4fa; background: transparent; font-size: 12px;")
+        btn_clear_logs.clicked.connect(lambda: self.text_logs.clear())
+        log_header.addWidget(btn_clear_logs)
+        lc_layout.addLayout(log_header)
+
         self.text_logs = QTextEdit()
         self.text_logs.setReadOnly(True)
-        lbl_hist = QLabel("Terminal de Actividad:")
-        lbl_hist.setStyleSheet("color: #bac2de; font-weight: bold; margin-top: 10px;")
-        logs_layout.addWidget(lbl_hist)
-        logs_layout.addWidget(self.text_logs)
+        lc_layout.addWidget(self.text_logs)
+        monitor_layout.addWidget(log_card)
         
-        # Sync Now button on logs page too
-        btn_sync_now_logs = QPushButton("🚀 Sincronizar Ahora")
-        btn_sync_now_logs.setObjectName("ActionBtn")
-        btn_sync_now_logs.clicked.connect(self.start_manual_sync)
-        logs_layout.addWidget(btn_sync_now_logs)
-        
-        self.tabs.addTab(self.tab_logs, "Monitor")
+        btn_sync_now = QPushButton("🚀 Sync Now")
+        btn_sync_now.setObjectName("ActionBtn")
+        btn_sync_now.clicked.connect(self.start_manual_sync)
+        monitor_layout.addWidget(btn_sync_now)
 
+        self.tabs.addTab(self.tab_monitor, "Monitor")
 
-        # --- TAB 2: CONFIGURACIÓN ---
+        # --- TAB 2: CONFIG --- (Minimalist update)
         self.tab_config = QWidget()
         config_layout = QVBoxLayout(self.tab_config)
+        config_layout.setContentsMargins(10, 20, 10, 20)
         config_layout.setSpacing(15)
-        config_layout.setContentsMargins(20, 20, 20, 20)
-        
-        # 1. Autenticación
-        auth_layout = QHBoxLayout()
-        btn_auth = QPushButton("Conectar Google Drive")
+
+        # Re-using previous setting widgets but styled
+        s_auth = QHBoxLayout()
+        s_auth.addWidget(QLabel("Account:"))
+        btn_auth = QPushButton("Login")
         btn_auth.clicked.connect(self.authenticate_drive)
-        btn_logout = QPushButton("Cerrar Sesión")
+        btn_logout = QPushButton("Logout")
         btn_logout.setObjectName("DangerBtn")
         btn_logout.clicked.connect(self.logout_drive)
-        auth_layout.addWidget(QLabel("🔑 Cuenta de Google:"))
-        auth_layout.addStretch()
-        auth_layout.addWidget(btn_auth)
-        auth_layout.addWidget(btn_logout)
-        config_layout.addLayout(auth_layout)
+        s_auth.addStretch()
+        s_auth.addWidget(btn_auth)
+        s_auth.addWidget(btn_logout)
+        config_layout.addLayout(s_auth)
 
-        # 2. Carpeta Local
-        local_layout = QHBoxLayout()
-        self.lbl_local_folder = QLabel("Carpeta Local: No seleccionada")
+        # Local
+        s_local = QVBoxLayout()
+        s_local.addWidget(QLabel("Local Folder:"))
+        row_local = QHBoxLayout()
+        self.lbl_local_folder = QLabel("Not selected")
         self.lbl_local_folder.setWordWrap(True)
-        btn_local = QPushButton("Seleccionar...")
+        btn_local = QPushButton("Select...")
         btn_local.clicked.connect(self.select_local_folder)
-        local_layout.addWidget(QLabel("💻 Carpeta Local:"))
-        local_layout.addWidget(self.lbl_local_folder, 1)
-        local_layout.addWidget(btn_local)
-        config_layout.addLayout(local_layout)
+        row_local.addWidget(self.lbl_local_folder, 1)
+        row_local.addWidget(btn_local)
+        s_local.addLayout(row_local)
+        config_layout.addLayout(s_local)
 
-        # 3. Carpeta Nube
-        cloud_layout = QHBoxLayout()
-        self.lbl_cloud_folder = QLabel("Carpeta Nube: No definida")
+        # Cloud
+        s_cloud = QVBoxLayout()
+        s_cloud.addWidget(QLabel("Cloud Folder:"))
+        row_cloud = QHBoxLayout()
+        self.lbl_cloud_folder = QLabel("Not selected")
         self.lbl_cloud_folder.setWordWrap(True)
-        btn_cloud = QPushButton("Seleccionar Nube...")
+        btn_cloud = QPushButton("Select...")
         btn_cloud.clicked.connect(self.set_cloud_id)
-        cloud_layout.addWidget(QLabel("☁️ Carpeta Nube:"))
-        cloud_layout.addWidget(self.lbl_cloud_folder, 1)
-        cloud_layout.addWidget(btn_cloud)
-        config_layout.addLayout(cloud_layout)
+        row_cloud.addWidget(self.lbl_cloud_folder, 1)
+        row_cloud.addWidget(btn_cloud)
+        s_cloud.addLayout(row_cloud)
+        config_layout.addLayout(s_cloud)
 
-        # 4. Dirección de Sync
-        dir_layout = QHBoxLayout()
-        dir_layout.addWidget(QLabel("🔄 Dirección:"))
+        # Mode
+        s_mode = QHBoxLayout()
+        s_mode.addWidget(QLabel("Sync Mode:"))
         self.combo_direction = QComboBox()
-        self.combo_direction.addItems([
-            "Bidireccional (Recomendado)", 
-            "Local a Nube (Backup)", 
-            "Nube a Local (Restore)"
-        ])
-        dir_layout.addWidget(self.combo_direction)
-        dir_layout.addStretch()
-        config_layout.addLayout(dir_layout)
+        self.combo_direction.addItems(["Bidirectional", "Local to Cloud", "Cloud to Local"])
+        s_mode.addWidget(self.combo_direction)
+        config_layout.addLayout(s_mode)
 
-        # 5. Frecuencia
-        freq_layout = QHBoxLayout()
-        freq_layout.addWidget(QLabel("⏱️ Cada:"))
+        # Interval
+        s_int = QHBoxLayout()
+        s_int.addWidget(QLabel("Interval:"))
         self.spin_freq = QSpinBox()
         self.spin_freq.setRange(1, 1440)
-        self.spin_freq.setValue(15)
         self.combo_unit = QComboBox()
-        self.combo_unit.addItems(["minutos", "segundos"])
+        self.combo_unit.addItems(["minutes", "seconds"])
+        s_int.addWidget(self.spin_freq)
+        s_int.addWidget(self.combo_unit)
+        s_int.addStretch()
+        config_layout.addLayout(s_int)
         
-        freq_layout.addWidget(self.spin_freq)
-        freq_layout.addWidget(self.combo_unit)
-        freq_layout.addStretch()
-        config_layout.addLayout(freq_layout)
+        self.chk_autostart = QCheckBox("Start with system")
+        config_layout.addWidget(self.chk_autostart)
 
-        # 5.5. Opciones del sistema (Autostart)
-        sys_layout = QHBoxLayout()
-        self.chk_autostart = QCheckBox("Iniciar automáticamente al encender el equipo")
-        sys_layout.addWidget(self.chk_autostart)
-        sys_layout.addStretch()
-        config_layout.addLayout(sys_layout)
-
-        # 6. Botones de Acción
-        action_layout = QHBoxLayout()
-        btn_save = QPushButton("💾 Guardar Configuración")
+        config_layout.addStretch()
+        btn_save = QPushButton("Save Settings")
         btn_save.setObjectName("ActionBtn")
         btn_save.clicked.connect(self.save_settings)
-        action_layout.addStretch()
-        action_layout.addWidget(btn_save)
-        config_layout.addLayout(action_layout)
-        
-        # LinkedIn Link
-        linkedin_layout = QHBoxLayout()
-        linkedin_layout.addStretch()
-        linkedin_label = QLabel('<a href="https://www.linkedin.com/in/dialp/" style="color: #89b4fa; text-decoration: none;">Linkedin</a>')
-        linkedin_label.setOpenExternalLinks(True)
-        linkedin_layout.addWidget(linkedin_label)
-        config_layout.addLayout(linkedin_layout)
-        config_layout.addStretch()
+        config_layout.addWidget(btn_save)
 
-        self.tabs.addTab(self.tab_config, "Ajustes")
-        
-        # Initial auth check
-        if self.auth.creds and (self.auth.creds.valid or getattr(self.auth.creds, 'refresh_token', False)):
-            self.lbl_auth_status.setText("Estado: Conectado a Drive ✔️")
-            self.lbl_auth_status.setStyleSheet("color: #a6e3a1; font-weight: bold; font-size: 14px;")
+        config_layout.addSpacing(20)
+        btn_reset = QPushButton("⚠️ Reset Application")
+        btn_reset.setObjectName("DangerBtn")
+        btn_reset.clicked.connect(self.reset_application)
+        config_layout.addWidget(btn_reset)
+
+        self.tabs.addTab(self.tab_config, "Settings")
+
+    def toggle_scheduler(self):
+        if self.scheduler.is_running():
+            self.scheduler.stop()
+            self.log_message("WARNING", "Auto-sync paused.")
         else:
-            self.lbl_auth_status.setText("Estado: Desconectado ❌")
-            self.lbl_auth_status.setStyleSheet("color: #f38ba8; font-weight: bold; font-size: 14px;")
+            self.scheduler.start()
+            self.log_message("INFO", "Auto-sync resumed.")
+        self.update_scheduler_btn_state()
+
+    def update_scheduler_btn_state(self):
+        if self.scheduler.is_running():
+            self.btn_stop_main.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
+            self.btn_stop_main.setToolTip("Pausar Sincronización")
+        else:
+            self.btn_stop_main.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+            self.btn_stop_main.setToolTip("Reanudar Sincronización")
 
     def init_tray_icon(self):
         self.tray_icon = QSystemTrayIcon(self)
-        
-        # Application icon
         icon_path = resource_path('folderFlow-icon.png')
-        icon = QIcon(icon_path)
-        self.tray_icon.setIcon(icon)
+        self.tray_icon.setIcon(QIcon(icon_path))
         
-        # Create tray menu
         tray_menu = QMenu()
-        show_action = tray_menu.addAction("Mostrar Aplicación")
+        show_action = tray_menu.addAction("Show App")
         show_action.triggered.connect(self.show_normal)
-        
-        sync_action = tray_menu.addAction("Sincronizar Ahora")
+        sync_action = tray_menu.addAction("Sync Now")
         sync_action.triggered.connect(self.start_manual_sync)
-        
-        quit_action = tray_menu.addAction("Salir Completamente")
+        quit_action = tray_menu.addAction("Quit")
         quit_action.triggered.connect(self.quit_app)
         
         self.tray_icon.setContextMenu(tray_menu)
@@ -455,139 +551,160 @@ class SyncAppMainWindow(QMainWindow):
         QApplication.quit()
 
     def select_local_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta Local")
+        folder = QFileDialog.getExistingDirectory(self, "Select Local Folder")
         if folder:
-            self.lbl_local_folder.setText(f"Carpeta Local: {folder}")
+            self.lbl_local_folder.setText(folder)
+            self.lbl_local_path_disp.setText(f"📁 Local: {os.path.basename(folder)}")
             self.config_manager.set('local_folder', folder)
 
     def set_cloud_id(self):
         if not self.auth.creds or not self.auth.creds.valid:
-            QMessageBox.warning(self, "No Autenticado", "Por favor, conecta Google Drive primero.")
+            QMessageBox.warning(self, "Auth Required", "Please login to Google Drive first.")
             return
             
         dialog = CloudFolderPickerDialog(self.auth, self)
         if dialog.exec():
             folder_id = dialog.selected_folder_id
             folder_name = dialog.selected_folder_name
-            self.lbl_cloud_folder.setText(f"Carpeta Nube: {folder_name} (ID: {folder_id[:8]}...)")
+            self.lbl_cloud_folder.setText(folder_name)
+            self.lbl_cloud_path_disp.setText(f"☁️ Drive: {folder_name}")
             self.config_manager.set('remote_folder_id', folder_id)
             self.config_manager.set('remote_folder_name', folder_name)
 
     def authenticate_drive(self):
         try:
             self.auth.authenticate()
-            self.lbl_auth_status.setText("Estado: Conectado a Google Drive ✔️")
-            self.lbl_auth_status.setStyleSheet("color: green;")
-            QMessageBox.information(self, "Autenticación", "Conexión exitosa con Google Drive.")
+            email = self.auth.get_user_email()
+            self.lbl_logged_user.setText(f"✅ Logged in as: {email}")
+            QMessageBox.information(self, "Auth", "Google Drive connected successfully.")
         except Exception as e:
-            QMessageBox.critical(self, "Error de Autenticación", str(e))
+            QMessageBox.critical(self, "Error", str(e))
 
     def logout_drive(self):
         if self.auth.logout():
-            self.lbl_auth_status.setText("Estado: Desconectado ❌ (Requiere Login)")
-            self.lbl_auth_status.setStyleSheet("color: orange;")
-            QMessageBox.information(self, "Sesión Cerrada", "Se ha cerrado la sesión de Google Drive.")
+            self.lbl_logged_user.setText("❌ Logged out")
+            QMessageBox.information(self, "Logout", "Disconnected from Google Drive.")
         else:
-            QMessageBox.warning(self, "Error", "No se pudo cerrar la sesión completamente.")
+            QMessageBox.warning(self, "Error", "Could not complete logout.")
 
     def load_settings(self):
         folder = self.config_manager.get('local_folder')
         if folder:
-            self.lbl_local_folder.setText(f"Carpeta Local: {folder}")
+            self.lbl_local_folder.setText(folder)
+            self.lbl_local_path_disp.setText(f"📁 Local: {os.path.basename(folder)}")
+        else:
+            self.lbl_local_folder.setText("No seleccionada")
+            self.lbl_local_path_disp.setText("📁 Local: No seleccionada")
             
         r_folder = self.config_manager.get('remote_folder_id')
         r_name = self.config_manager.get('remote_folder_name')
         if r_folder:
             name_display = r_name if r_name else "Definida"
-            self.lbl_cloud_folder.setText(f"Carpeta Nube: {name_display} (ID: {r_folder[:8]}...)")
+            self.lbl_cloud_folder.setText(f"Carpeta Nube: {name_display} (ID: {r_folder[:8]}...)" if len(r_folder) >= 8 else f"Carpeta Nube: {name_display} (ID: {r_folder})")
+            self.lbl_cloud_path_disp.setText(f"☁️ Drive: {name_display}")
+        else:
+            self.lbl_cloud_folder.setText("No seleccionada")
+            self.lbl_cloud_path_disp.setText("☁️ Drive: No seleccionada")
         
-        freq = self.config_manager.get('sync_frequency_minutes')
-        unit = self.config_manager.get('sync_time_unit') or 'minutos'
-        if freq:
-            self.spin_freq.setValue(int(freq))
-            if unit == 'segundos' or unit == 'seconds':
-                self.combo_unit.setCurrentText('segundos')
-            else:
-                self.combo_unit.setCurrentText('minutos')
-                
-        # Cargar estado real de autostart
+        freq = self.config_manager.get('sync_frequency_minutes') or 15
+        unit = self.config_manager.get('sync_time_unit') or 'minutes'
+        self.spin_freq.setValue(int(freq))
+        self.combo_unit.setCurrentText(unit if unit == 'seconds' else 'minutes')
+        self.lbl_interval_disp.setText(f"⏱️ Interval: {freq} {unit}")
+        
+        mode = self.config_manager.get('sync_direction') or 'bidirectional'
+        mode_idx = 0
+        if mode == 'local_to_cloud': mode_idx = 1
+        elif mode == 'cloud_to_local': mode_idx = 2
+        self.combo_direction.setCurrentIndex(mode_idx)
+        self.lbl_mode_disp.setText(f"🔄 Mode: {mode.replace('_', ' ').title()}")
+
         self.chk_autostart.setChecked(is_autostart_enabled())
+        
+        if self.auth.creds:
+            email = self.auth.get_user_email()
+            self.lbl_logged_user.setText(f"✅ Logged in as: {email}") if email else self.lbl_logged_user.setText("✅ Logged in")
+        else:
+            self.lbl_logged_user.setText("❌ Logged out")
 
     def save_settings(self):
-        # Convert internal values
-        unit = 'seconds' if self.combo_unit.currentText() == 'segundos' else 'minutes'
-        self.config_manager.set('sync_frequency_minutes', self.spin_freq.value())
+        unit = self.combo_unit.currentText()
+        freq = self.spin_freq.value()
+        self.config_manager.set('sync_frequency_minutes', freq)
         self.config_manager.set('sync_time_unit', unit)
+        self.lbl_interval_disp.setText(f"⏱️ Interval: {freq} {unit}")
         
-        direction = self.combo_direction.currentText()
-        if "Bidireccional" in direction:
-            mode = "bidirectional"
-        elif "Local" in direction and "Nube" in direction:
-            mode = "local_to_cloud" if "Local a" in direction else "cloud_to_local"
+        mode = "bidirectional"
+        idx = self.combo_direction.currentIndex()
+        if idx == 1: mode = "local_to_cloud"
+        elif idx == 2: mode = "cloud_to_local"
         self.config_manager.set('sync_direction', mode)
+        self.lbl_mode_disp.setText(f"🔄 Mode: {mode.replace('_', ' ').title()}")
         
-        # Guardar y aplicar configuración de inicio automático
         autostart = self.chk_autostart.isChecked()
         self.config_manager.set('autostart', autostart)
-        if autostart:
-            enable_autostart()
-        else:
-            disable_autostart()
+        if autostart: enable_autostart()
+        else: disable_autostart()
         
-        self.scheduler.update_frequency(self.spin_freq.value(), unit)
-        QMessageBox.information(self, "Éxito", "Configuración guardada correctamente y sincronizador actualizado.")
+        self.scheduler.update_frequency(freq, unit)
+        QMessageBox.information(self, "Success", "Settings saved.")
         self.update_scheduler_btn_state()
 
-    def toggle_scheduler(self):
-        if self.scheduler.is_running():
+    def reset_application(self):
+        reply = QMessageBox.question(
+            self, "Confirm Reset",
+            "This will clear all settings, file tracking, and logout.\n"
+            "Local files will NOT be deleted. Do you want to proceed?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # 1. Stop scheduler
             self.scheduler.stop()
-            self.log_message("Sincronizador automático pausado.")
-        else:
-            self.scheduler.start()
-            self.log_message("Sincronizador automático reanudado.")
-        self.update_scheduler_btn_state()
+            
+            # 2. Clear tracker DB
+            from src.tracker import SyncTracker
+            tracker = SyncTracker()
+            tracker.clear_all_states()
+            
+            # 3. Reset config
+            self.config_manager.reset_config()
+            
+            # 4. Logout
+            self.auth.logout()
 
-    def update_scheduler_btn_state(self):
-        if self.scheduler.is_running():
-            self.btn_toggle_scheduler.setText("Pausar Sincronizador ⏸️")
-        else:
-            self.btn_toggle_scheduler.setText("Reanudar Sincronizador ▶️")
+            # 5. Disable autostart
+            disable_autostart()
+            
+            # 6. Reload UI
+            self.load_settings()
+            self.update_scheduler_btn_state()
+            self.text_logs.clear()
+            self.lbl_sync_state.setText("Sync state: Reset completed")
+            
+            QMessageBox.information(self, "Reset", "Application has been reset to its initial state.")
 
     def start_manual_sync(self):
-        self.lbl_auth_status.setText("Estado: Sincronizando...")
-        self.lbl_auth_status.setStyleSheet("color: blue;")
-        # No rededclaramos signals si ya existen
+        self.lbl_sync_state.setText("Sync state: Starting...")
         threading.Thread(target=self._run_sync_thread, daemon=True).start()
 
     def _run_sync_thread(self):
         try:
-            # Aquí idealmente se inyectaría una callback de progreso al engine
-            # Por simplicidad ahora solo triggereamos y notificamos al final
-            success = self.scheduler.trigger_sync_with_result() # Modificación ligera al scheduler necesaria
-            self.signals.sync_finished.emit(success, "Sincronización manual terminada.")
+            success = self.scheduler.trigger_sync_with_result(status_callback=self._status_callback)
+            self.signals.sync_finished.emit(success, "Manual sync completed.")
         except Exception as e:
             self.signals.sync_finished.emit(False, str(e))
             
     def _on_sync_finished(self, success, message):
         if success:
-            self.lbl_auth_status.setText("Estado: Sincronización finalizada ✔️")
-            self.lbl_auth_status.setStyleSheet("color: green;")
+            self.lbl_sync_state.setText("Sync state: Idle (Last success moments ago)")
         else:
-            self.lbl_auth_status.setText(f"Estado: Error en Sincronización ❌")
-            self.lbl_auth_status.setStyleSheet("color: red;")
-            # You might want to log the error instead of interrupting with a messagebox if in background
-            self.log_message(f"FALLA: {message}")
+            self.lbl_sync_state.setText(f"Sync state: Error")
+            self.log_message("ERROR", f"Sync failed: {message}")
 
     def closeEvent(self, event):
-        # Override close to minimize to tray instead
         if self.tray_icon.isVisible():
             self.hide()
-            self.tray_icon.showMessage(
-                "FolderFlow",
-                "La aplicación sigue ejecutándose en segundo plano.",
-                QSystemTrayIcon.MessageIcon.Information,
-                2000
-            )
             event.ignore()
         else:
             self.scheduler.stop()

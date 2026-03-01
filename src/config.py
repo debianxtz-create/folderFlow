@@ -48,3 +48,7 @@ class ConfigManager:
     def set(self, key, value):
         self.config[key] = value
         self.save_config()
+
+    def reset_config(self):
+        self.config = DEFAULT_CONFIG.copy()
+        self.save_config()

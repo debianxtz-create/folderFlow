@@ -16,24 +16,30 @@ class SyncScheduler:
             schedule.run_pending()
             time.sleep(1)
 
-    def trigger_sync(self):
-        print("[Scheduler] Ejecutando sincronización automática...")
+    def trigger_sync(self, status_callback=None):
+        if not status_callback:
+            print("[Scheduler] Ejecutando sincronización automática...")
         try:
-            self.engine.sync()
+            self.engine.sync(status_callback=status_callback)
             self.config.set('last_sync', time.time())
         except Exception as e:
-            print(f"[Scheduler] Error en sync: {e}")
+            msg = f"[Scheduler] Error en sync: {e}"
+            if status_callback: status_callback('ERROR', msg)
+            print(msg)
 
-    def trigger_sync_with_result(self):
+    def trigger_sync_with_result(self, status_callback=None):
         """Versión de trigger_sync que devuelve éxito/falla para la UI manual."""
-        print("[Scheduler] Ejecutando sincronización manual...")
+        if not status_callback:
+            print("[Scheduler] Ejecutando sincronización manual...")
         try:
-            success = self.engine.sync()
+            success = self.engine.sync(status_callback=status_callback)
             if success:
                 self.config.set('last_sync', time.time())
             return success
         except Exception as e:
-            print(f"[Scheduler] Error en sync: {e}")
+            msg = f"[Scheduler] Error en sync: {e}"
+            if status_callback: status_callback('ERROR', msg)
+            print(msg)
             raise e
 
     def start(self):
@@ -57,6 +63,7 @@ class SyncScheduler:
 
     def stop(self):
         self._running = False
+        self.engine.stop()
         if self._thread:
             # We don't join immediately to avoid blocking UI during fast toggles, daemon threads will die anyway
             self._thread = None

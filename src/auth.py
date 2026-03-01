@@ -68,6 +68,16 @@ class GoogleAuth:
                 return False
         return True
 
+    def get_user_email(self):
+        """Obtiene el email del usuario autenticado."""
+        try:
+            service = self.get_drive_service()
+            about = service.about().get(fields="user(emailAddress)").execute()
+            return about.get('user', {}).get('emailAddress')
+        except Exception as e:
+            print(f"Error obteniendo email de usuario: {e}")
+            return None
+
     def get_drive_service(self):
         """Devuelve una instancia del servicio de Google Drive."""
         if not self.creds:
